@@ -1,0 +1,217 @@
+diff --git a/frontend/src/components/PinStrings.jsx b/frontend/src/components/PinStrings.jsx
+new file mode 100644
+index 0000000..6f712f0
+--- /dev/null
++++ b/frontend/src/components/PinStrings.jsx
+@@ -0,0 +1,85 @@
++// Red string between pins stuck on a row of photos.
++//
++// The board's own strings live behind all paper, so they cannot cross a sheet. This is a
++// small overlay for one pane instead: the parent registers one anchor element per photo
++// (where the pin goes), this component measures the anchors against the container and
++// draws a sagging string from each pin to the next, then the pin heads on top so every
++// string ends exactly under a pin. It re-measures on resize, font and image loads.
++import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
++
++function same(a, b) {
++  return (
++    a.length === b.length &&
++    a.every((p, i) => p.id === b[i].id && Math.abs(p.x - b[i].x) < 0.5 && Math.abs(p.y - b[i].y) < 0.5)
++  );
++}
++
++export function PinStrings({ containerRef, anchorsRef, ids, sag = 12 }) {
++  const [pts, setPts] = useState([]);
++  const raf = useRef(0);
++  const key = ids.join("|");
++
++  const measure = useCallback(() => {
++    cancelAnimationFrame(raf.current);
++    raf.current = requestAnimationFrame(() => {
++      const box = containerRef.current;
++      if (!box) return;
++      const b = box.getBoundingClientRect();
++      const next = [];
++      for (const id of ids) {
++        const el = anchorsRef.current.get(id);
++        if (!el || !el.isConnected) continue;
++        const r = el.getBoundingClientRect();
++        next.push({ id, x: r.left + r.width / 2 - b.left, y: r.top + r.height / 2 - b.top });
++      }
++      setPts((prev) => (same(prev, next) ? prev : next));
++    });
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [containerRef, anchorsRef, key]);
++
++  useLayoutEffect(() => {
++    measure();
++    // entrance animations of the pane settle a moment later
++    const t = setTimeout(measure, 400);
++    return () => clearTimeout(t);
++  }, [measure]);
++
++  useEffect(() => {
++    const box = containerRef.current;
++    if (!box) return undefined;
++    const ro = new ResizeObserver(measure);
++    ro.observe(box);
++    const onLoad = (e) => e.target instanceof HTMLImageElement && measure();
++    box.addEventListener("load", onLoad, true);
++    window.addEventListener("resize", measure);
++    document.fonts?.ready?.then(measure);
++    return () => {
++      cancelAnimationFrame(raf.current);
++      ro.disconnect();
++      box.removeEventListener("load", onLoad, true);
++      window.removeEventListener("resize", measure);
++    };
++  }, [containerRef, measure]);
++
++  return (
++    <div className="pin-strings" aria-hidden="true">
++      <svg>
++        {pts.slice(1).map((B, i) => {
++          const A = pts[i];
++          const len = Math.hypot(B.x - A.x, B.y - A.y);
++          const dip = Math.min(sag, len * 0.06);
++          const d = `M${A.x.toFixed(1)} ${A.y.toFixed(1)} Q${((A.x + B.x) / 2).toFixed(1)} ${((A.y + B.y) / 2 + dip).toFixed(1)} ${B.x.toFixed(1)} ${B.y.toFixed(1)}`;
++          // keyed by the pair so a new page of photos draws its strings in again
++          return <path key={`${A.id}-${B.id}`} d={d} pathLength="1" style={{ animationDelay: `${0.25 + i * 0.3}s` }} />;
++        })}
++      </svg>
++      {pts.map((p, i) => (
++        <span
++          key={p.id}
++          className="pin pin-red pin-strings-head"
++          style={{ transform: `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`, animationDelay: `${i * 0.12}s` }}
++        />
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/pages/witness/Witness.jsx b/frontend/src/pages/witness/Witness.jsx
+index 018581d..83b7fb8 100644
+--- a/frontend/src/pages/witness/Witness.jsx
++++ b/frontend/src/pages/witness/Witness.jsx
+@@ -18,6 +18,7 @@
+ */
+ import { useCallback, useEffect, useRef, useState } from "react";
+ import { Board, Pin } from "../../components/Board.jsx";
++import { PinStrings } from "../../components/PinStrings.jsx";
+ import { Paper, Stamp, InkButton } from "../../components/Paper.jsx";
+ import { PauseGlyph, ArrowGlyph, MicGlyph } from "../../components/Glyph.jsx";
+ import SketchCanvas from "../../components/SketchCanvas.jsx";
+@@ -815,6 +816,8 @@ function SideNote({ t, view, onBack }) {
+ function VaultPane({ t, sid, token, call, reportShown }) {
+   const [tree, setTree] = useState([]);
+   const [page, setPage] = useState(0);
++  const boxRef = useRef(null);
++  const anchors = useRef(new Map()); // sketch version id -> the spot where its pin goes
+   useEffect(() => {
+     call(`/sessions/${sid}/sketch-tree`)
+       .then((rows) => setTree([...rows].reverse()))
+@@ -823,7 +826,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
+   const pages = Math.max(1, Math.ceil(tree.length / 3));
+   const rows = tree.slice(page * 3, page * 3 + 3);
+   return (
+-    <div className="vault">
++    <div className="vault" ref={boxRef}>
+       <HeadingStrip t={t} text={t("vaultHeading")} />
+       {tree.length === 0 && (
+         <L lang={t.lang} as="p" className="sheet-empty">
+@@ -834,6 +837,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
+         {rows.map((v) => (
+           <div key={v.id} className="vault-item">
+             <div className="polaroid vault-polaroid" style={{ "--rot": `${tilt(v.id, 2)}deg` }}>
++              <span className="vault-anchor" ref={(el) => (el ? anchors.current.set(v.id, el) : anchors.current.delete(v.id))} />
+               <span className="polaroid-window">
+                 <AuthImage fileId={v.sketch_file_id} token={token} onShown={() => reportShown({ sketch_version_id: v.id, screen: "vault" })} />
+               </span>
+@@ -841,6 +845,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
+           </div>
+         ))}
+       </div>
++      <PinStrings containerRef={boxRef} anchorsRef={anchors} ids={rows.map((v) => v.id)} />
+       {pages > 1 && (
+         <div className="vault-nav">
+           <InkButton onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+diff --git a/frontend/src/styles/witness.css b/frontend/src/styles/witness.css
+index be9c187..8a3a964 100644
+--- a/frontend/src/styles/witness.css
++++ b/frontend/src/styles/witness.css
+@@ -466,8 +466,75 @@
+   gap: 10px;
+   justify-items: center;
+ }
++.vault {
++  position: relative;
++}
+ .vault-polaroid {
++  position: relative;
++  width: 100%;
++}
++/* where the pin through each photo goes (measured by PinStrings) */
++.vault-anchor {
++  position: absolute;
++  left: 50%;
++  top: 4px;
++  width: 0;
++  height: 0;
++}
++/* red string from pin to pin across the photos, drawn above them */
++.pin-strings {
++  position: absolute;
++  inset: 0;
++  z-index: 5;
++  pointer-events: none;
++}
++.pin-strings svg {
++  position: absolute;
++  inset: 0;
+   width: 100%;
++  height: 100%;
++  overflow: visible;
++  filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.4));
++}
++.pin-strings path {
++  fill: none;
++  stroke: var(--string);
++  stroke-width: var(--string-w);
++  stroke-linecap: round;
++  stroke-opacity: 0.95;
++  stroke-dasharray: 1;
++  stroke-dashoffset: 1;
++  animation: string-draw 0.7s ease-out forwards;
++}
++.pin-strings .pin-strings-head {
++  left: 0;
++  top: 0;
++  margin: calc(var(--pin-size) / -2) 0 0 calc(var(--pin-size) / -2);
++  animation: pin-drop 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both;
++}
++@keyframes string-draw {
++  to {
++    stroke-dashoffset: 0;
++  }
++}
++@keyframes pin-drop {
++  from {
++    scale: 1.8;
++    opacity: 0;
++  }
++  to {
++    scale: 1;
++    opacity: 1;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  .pin-strings path {
++    animation: none;
++    stroke-dashoffset: 0;
++  }
++  .pin-strings .pin-strings-head {
++    animation: none;
++  }
+ }
+ .vault-polaroid.is-current {
+   outline: 1.5px solid var(--string);

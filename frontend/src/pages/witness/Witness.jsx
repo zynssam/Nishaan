@@ -18,6 +18,7 @@
 */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Board, Pin } from "../../components/Board.jsx";
+import { PinStrings } from "../../components/PinStrings.jsx";
 import { Paper, Stamp, InkButton } from "../../components/Paper.jsx";
 import { PauseGlyph, ArrowGlyph, MicGlyph } from "../../components/Glyph.jsx";
 import SketchCanvas from "../../components/SketchCanvas.jsx";
@@ -815,6 +816,8 @@ function SideNote({ t, view, onBack }) {
 function VaultPane({ t, sid, token, call, reportShown }) {
   const [tree, setTree] = useState([]);
   const [page, setPage] = useState(0);
+  const boxRef = useRef(null);
+  const anchors = useRef(new Map()); // sketch version id -> the spot where its pin goes
   useEffect(() => {
     call(`/sessions/${sid}/sketch-tree`)
       .then((rows) => setTree([...rows].reverse()))
@@ -823,7 +826,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
   const pages = Math.max(1, Math.ceil(tree.length / 3));
   const rows = tree.slice(page * 3, page * 3 + 3);
   return (
-    <div className="vault">
+    <div className="vault" ref={boxRef}>
       <HeadingStrip t={t} text={t("vaultHeading")} />
       {tree.length === 0 && (
         <L lang={t.lang} as="p" className="sheet-empty">
@@ -834,6 +837,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
         {rows.map((v) => (
           <div key={v.id} className="vault-item">
             <div className="polaroid vault-polaroid" style={{ "--rot": `${tilt(v.id, 2)}deg` }}>
+              <span className="vault-anchor" ref={(el) => (el ? anchors.current.set(v.id, el) : anchors.current.delete(v.id))} />
               <span className="polaroid-window">
                 <AuthImage fileId={v.sketch_file_id} token={token} onShown={() => reportShown({ sketch_version_id: v.id, screen: "vault" })} />
               </span>
@@ -841,6 +845,7 @@ function VaultPane({ t, sid, token, call, reportShown }) {
           </div>
         ))}
       </div>
+      <PinStrings containerRef={boxRef} anchorsRef={anchors} ids={rows.map((v) => v.id)} />
       {pages > 1 && (
         <div className="vault-nav">
           <InkButton onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
