@@ -466,8 +466,75 @@
   gap: 10px;
   justify-items: center;
 }
+.vault {
+  position: relative;
+}
 .vault-polaroid {
+  position: relative;
   width: 100%;
+}
+/* where the pin through each photo goes (measured by PinStrings) */
+.vault-anchor {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 0;
+  height: 0;
+}
+/* red string from pin to pin across the photos, drawn above them */
+.pin-strings {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.pin-strings svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.4));
+}
+.pin-strings path {
+  fill: none;
+  stroke: var(--string);
+  stroke-width: var(--string-w);
+  stroke-linecap: round;
+  stroke-opacity: 0.95;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: string-draw 0.7s ease-out forwards;
+}
+.pin-strings .pin-strings-head {
+  left: 0;
+  top: 0;
+  margin: calc(var(--pin-size) / -2) 0 0 calc(var(--pin-size) / -2);
+  animation: pin-drop 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+@keyframes string-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pin-drop {
+  from {
+    scale: 1.8;
+    opacity: 0;
+  }
+  to {
+    scale: 1;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin-strings path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .pin-strings .pin-strings-head {
+    animation: none;
+  }
 }
 .vault-polaroid.is-current {
   outline: 1.5px solid var(--string);
